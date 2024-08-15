@@ -22,8 +22,9 @@ const char *CardDatabase::TOKENS_SETNAME = "TK";
 CardSet::CardSet(const QString &_shortName,
                  const QString &_longName,
                  const QString &_setType,
-                 const QDate &_releaseDate)
-    : shortName(_shortName), longName(_longName), releaseDate(_releaseDate), setType(_setType)
+                 const QDate &_releaseDate,
+                 const CardSet::Priority _priority)
+    : shortName(_shortName), longName(_longName), releaseDate(_releaseDate), setType(_setType), priority(_priority)
 {
     loadSetOptions();
 }
@@ -31,9 +32,10 @@ CardSet::CardSet(const QString &_shortName,
 CardSetPtr CardSet::newInstance(const QString &_shortName,
                                 const QString &_longName,
                                 const QString &_setType,
-                                const QDate &_releaseDate)
+                                const QDate &_releaseDate,
+                                const Priority _priority)
 {
-    CardSetPtr ptr(new CardSet(_shortName, _longName, _setType, _releaseDate));
+    CardSetPtr ptr(new CardSet(_shortName, _longName, _setType, _releaseDate, _priority));
     // ptr->setSmartPointer(ptr);
     return ptr;
 }
@@ -194,9 +196,16 @@ void SetList::markAllAsKnown()
 
 void SetList::guessSortKeys()
 {
-    // sort by release date DESC; invalid dates to the bottom.
-    QDate distantFuture(2050, 1, 1);
-    int aHundredYears = 36500;
+    // restoreOriginalSortOrder();
+    // for (int i = 0; i < size(); ++i) {
+    //     CardSetPtr set = at(i);
+    //     set->setSortKey(i);
+    // }
+    // sort by set type priority followed by date.
+    QDate epoch(1990, 1, 1);
+    QDate yearFromNow = QDate::currentDate().addYears(1);
+    qint64 fromEpoch = epoch.daysTo(yearFromNow);
+
     for (int i = 0; i < size(); ++i) {
         CardSetPtr set = at(i);
         if (set.isNull()) {
@@ -205,14 +214,32 @@ void SetList::guessSortKeys()
         }
 
         QDate date = set->getReleaseDate();
-        if (date.isNull()) {
-            set->setSortKey(static_cast<unsigned int>(aHundredYears * 2));
-        } else if (set->getSetType() == "Core" || set->getSetType() == "Expansion") {
-            set->setSortKey(static_cast<unsigned int>(date.daysTo(distantFuture)));
-        } else {
-            set->setSortKey(static_cast<unsigned int>(aHundredYears + date.daysTo(distantFuture)));
+        qint64 toYearFromNow = date.daysTo(yearFromNow);
+        CardSet::Priority priority = set->getPriority();
+        if (!date.isValid()) {
+            priority = CardSet::Priority::LOWEST;
         }
+
+        set->setSortKey(static_cast<unsigned int>(toYearFromNow + fromEpoch * priority));
     }
+}
+
+void SetList::restoreOriginalSortOrder()
+{
+    std::sort(begin(), end(), [](const CardSetPtr &a, const CardSetPtr &b) {
+        QDate distantPast = QDate(1970, 1, 1);
+        QDate aDate = a->getReleaseDate().isValid() ? a->getReleaseDate() : distantPast;
+        QDate bDate = b->getReleaseDate().isValid() ? b->getReleaseDate() : distantPast;
+
+        // Sort by priority, then by release date, then by short name
+        if (a->getPriority() == b->getPriority()) {
+            if (aDate.daysTo(bDate) == 0) {
+                return a->getShortName().compare(b->getShortName()) < 0;
+            }
+            return aDate.daysTo(bDate) < 0;
+        }
+        return a->getPriority() < b->getPriority();
+    });
 }
 
 CardInfoPerSet::CardInfoPerSet(const CardSetPtr &_set) : set(_set)
